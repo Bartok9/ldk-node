@@ -427,9 +427,9 @@ impl NodeBuilder {
 	/// ## Parameters:
 	/// * `rpc_host`, `rpc_port`, `rpc_user`, `rpc_password` - Required parameters for the Bitcoin Core RPC
 	///   connection.
-	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from on first
-	///   startup, before wallet state exists. Existing wallets are not rewound. The height must
-	///   be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
+	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from (inclusive) on
+	///   first startup, before wallet state exists. Existing wallets are not rewound. The height
+	///   must be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
 	///   checkpoints at the current tip.
 	#[cfg(feature = "chain-bitcoind")]
 	pub fn set_chain_source_bitcoind_rpc(
@@ -456,9 +456,9 @@ impl NodeBuilder {
 	/// * `rest_host`, `rest_port` - Required parameters for the Bitcoin Core REST connection.
 	/// * `rpc_host`, `rpc_port`, `rpc_user`, `rpc_password` - Required parameters for the Bitcoin Core RPC
 	///   connection
-	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from on first
-	///   startup, before wallet state exists. Existing wallets are not rewound. The height must
-	///   be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
+	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from (inclusive) on
+	///   first startup, before wallet state exists. Existing wallets are not rewound. The height
+	///   must be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
 	///   checkpoints at the current tip.
 	#[cfg(feature = "chain-bitcoind")]
 	pub fn set_chain_source_bitcoind_rest(
@@ -1075,9 +1075,9 @@ impl Builder {
 	/// ## Parameters:
 	/// * `rpc_host`, `rpc_port`, `rpc_user`, `rpc_password` - Required parameters for the Bitcoin Core RPC
 	///   connection.
-	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from on first
-	///   startup, before wallet state exists. Existing wallets are not rewound. The height must
-	///   be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
+	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from (inclusive) on
+	///   first startup, before wallet state exists. Existing wallets are not rewound. The height
+	///   must be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
 	///   checkpoints at the current tip.
 	pub fn set_chain_source_bitcoind_rpc(
 		&self, rpc_host: String, rpc_port: u16, rpc_user: String, rpc_password: String,
@@ -1101,9 +1101,9 @@ impl Builder {
 	/// * `rest_host`, `rest_port` - Required parameters for the Bitcoin Core REST connection.
 	/// * `rpc_host`, `rpc_port`, `rpc_user`, `rpc_password` - Required parameters for the Bitcoin Core RPC
 	///   connection
-	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from on first
-	///   startup, before wallet state exists. Existing wallets are not rewound. The height must
-	///   be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
+	/// * `wallet_rescan_from_height` - Optional wallet birthday height to rescan from (inclusive) on
+	///   first startup, before wallet state exists. Existing wallets are not rewound. The height
+	///   must be at or below the current tip. Passing `Some(0)` rescans from genesis; passing `None`
 	///   checkpoints at the current tip.
 	pub fn set_chain_source_bitcoind_rest(
 		&self, rest_host: String, rest_port: u16, rpc_host: String, rpc_port: u16,
@@ -1771,8 +1771,9 @@ fn build_with_store_internal(
 				})?;
 
 			// Decide which block (if any) to insert as the initial BDK checkpoint. If the
-			// bitcoind config provides a wallet rescan height, resolve that block and use it as
-			// the checkpoint. Otherwise, use the current chain tip to avoid any rescan.
+			// bitcoind config provides a wallet rescan height, use the preceding block as the
+			// checkpoint so synchronization includes the requested height. Otherwise, use the
+			// current chain tip to avoid any rescan.
 			let checkpoint_block = match wallet_rescan_from_height {
 				None => chain_tip_opt,
 				#[cfg(feature = "chain-bitcoind")]
@@ -1788,6 +1789,10 @@ fn build_with_store_internal(
 							return Err(BuildError::WalletRescanHeightTooHigh);
 						}
 					}
+					// `synchronize_listeners` connects blocks strictly above each listener's
+					// checkpoint. The genesis block is already BDK's initial checkpoint, so
+					// saturating subtraction also handles a requested height of zero.
+					let checkpoint_height = height.saturating_sub(1);
 
 					let utxo_source = chain_source.as_utxo_source().ok_or_else(|| {
 						log_error!(
@@ -1799,16 +1804,17 @@ fn build_with_store_internal(
 					let hash_res = runtime.block_on(async {
 						lightning_block_sync::gossip::UtxoSource::get_block_hash_by_height(
 							&utxo_source,
-							height,
+							checkpoint_height,
 						)
 						.await
 					});
 					match hash_res {
-						Ok(hash) => Some(BlockLocator::new(hash, height)),
+						Ok(hash) => Some(BlockLocator::new(hash, checkpoint_height)),
 						Err(e) => {
 							log_error!(
 								logger,
-								"Failed to resolve block hash at height {} for wallet rescan: {:?}",
+								"Failed to resolve checkpoint block hash at height {} for wallet rescan from height {}: {:?}",
+								checkpoint_height,
 								height,
 								e,
 							);
