@@ -1557,19 +1557,20 @@ async fn do_onchain_wallet_full_scan_stop_gap_recovers_far_funds(
 
 #[cfg(feature = "chain-bitcoind")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn onchain_wallet_recovery_rescans_from_birthday_height() {
+async fn onchain_wallet_recovery_includes_rescan_height() {
 	// End-to-end test for `wallet_rescan_from_height` against a bitcoind chain source. The
 	// scenario:
 	//
 	// 1. Create a node at some "birthday" height and generate two receive addresses.
 	// 2. Shut the node down and drop all persisted state except the seed.
 	// 3. Advance the chain past the birthday.
-	// 4. Send funds to the addresses generated at the birthday height and confirm them.
+	// 4. Send funds to both addresses and confirm both transactions in the same block.
 	// 5. Restart a fresh node with just the seed and no rescan height. Its wallet birthday
-	//    is pinned at the current tip, which is above the blocks containing the funding
-	//    transactions — so the node must not see the funds.
-	// 6. Restart again with `wallet_rescan_from_height: Some(birthday)`. Now the wallet must
-	//    find and report both funding transactions.
+	//    is pinned at the funding block, so the node must not see the funds.
+	// 6. Restart with the original birthday as `wallet_rescan_from_height` and confirm both
+	//    transactions are found, preserving the previous test case.
+	// 7. Restart again with the funding block itself as `wallet_rescan_from_height` and confirm
+	//    both transactions are found, proving that the configured height is inclusive.
 	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
 	// We specifically exercise the bitcoind RPC backend because that's where
 	// `rescan_from_height` is honored precisely (via `get_block_hash_by_height`).
@@ -1587,7 +1588,6 @@ async fn onchain_wallet_recovery_rescans_from_birthday_height() {
 
 	let addr_1 = original_node.onchain_payment().new_address().unwrap();
 	let addr_2 = original_node.onchain_payment().new_address().unwrap();
-
 	let birthday_height: u32 = bitcoind
 		.client
 		.get_blockchain_info()
@@ -1600,11 +1600,11 @@ async fn onchain_wallet_recovery_rescans_from_birthday_height() {
 	original_node.stop().unwrap();
 	drop(original_node);
 
-	// Step 3: advance the chain past the birthday, so a fresh node would otherwise pin its
-	// wallet birthday at a height above the funding transactions in step 4.
+	// Step 3: advance the chain past the original wallet birthday.
 	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 10).await;
 
-	// Step 4: fund both addresses and confirm them.
+	// Step 4: queue both transactions before mining so they are confirmed in the same block, as
+	// exercised by the previous version of this test.
 	let txid_1 = bitcoind
 		.client
 		.send_to_address(&addr_1, Amount::from_sat(premine_amount_sat))
@@ -1621,10 +1621,14 @@ async fn onchain_wallet_recovery_rescans_from_birthday_height() {
 		.parse()
 		.unwrap();
 	wait_for_tx(&electrsd.client, txid_2).await;
+	let funding_height: u32 =
+		(bitcoind.client.get_blockchain_info().expect("failed to get blockchain info").blocks + 1)
+			.try_into()
+			.unwrap();
 	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 1).await;
 
-	// Step 5: restart a fresh node with only the seed and no rescan height. It must NOT see
-	// the funds, because its wallet birthday sits above the funding transactions.
+	// Step 5: restart a fresh node with only the seed and no rescan height. It must NOT see the
+	// funds, because its wallet birthday is the block containing both funding transactions.
 	let mut pinned_config = random_config();
 	pinned_config.node_entropy = original_node_entropy;
 	let pinned_node = setup_node(&chain_source, pinned_config);
@@ -1632,22 +1636,37 @@ async fn onchain_wallet_recovery_rescans_from_birthday_height() {
 	assert_eq!(
 		pinned_node.list_balances().spendable_onchain_balance_sats,
 		0,
-		"fresh node without rescan height should not find funds below its wallet birthday"
+		"fresh node without rescan height should not scan its wallet birthday block"
 	);
 	pinned_node.stop().unwrap();
 	drop(pinned_node);
 
-	// Step 6: restart with a rescan height set to the birthday height. Funds must be
-	// re-discovered.
-	let mut recovered_config = random_config();
-	recovered_config.node_entropy = original_node_entropy;
-	recovered_config.wallet_rescan_from_height = Some(birthday_height);
-	let recovered_node = setup_node(&chain_source, recovered_config);
-	recovered_node.sync_wallets().unwrap();
+	// Step 6: recover from the original wallet birthday, retaining the previous test's case where
+	// both transactions are found 11 blocks after the configured rescan height.
+	let mut birthday_recovery_config = random_config();
+	birthday_recovery_config.node_entropy = original_node_entropy;
+	birthday_recovery_config.wallet_rescan_from_height = Some(birthday_height);
+	let birthday_recovered_node = setup_node(&chain_source, birthday_recovery_config);
+	birthday_recovered_node.sync_wallets().unwrap();
 	assert_eq!(
-		recovered_node.list_balances().spendable_onchain_balance_sats,
+		birthday_recovered_node.list_balances().spendable_onchain_balance_sats,
 		premine_amount_sat * 2,
-		"node recovered with rescan_from_height should see funds sent to pre-birthday addresses"
+		"node recovered from the wallet birthday should find both same-block transactions"
+	);
+	birthday_recovered_node.stop().unwrap();
+	drop(birthday_recovered_node);
+
+	// Step 7: recover from the funding block itself. Both transactions must still be found, proving
+	// that `wallet_rescan_from_height` is inclusive.
+	let mut funding_block_recovery_config = random_config();
+	funding_block_recovery_config.node_entropy = original_node_entropy;
+	funding_block_recovery_config.wallet_rescan_from_height = Some(funding_height);
+	let funding_block_recovered_node = setup_node(&chain_source, funding_block_recovery_config);
+	funding_block_recovered_node.sync_wallets().unwrap();
+	assert_eq!(
+		funding_block_recovered_node.list_balances().spendable_onchain_balance_sats,
+		premine_amount_sat * 2,
+		"node recovered from the funding block should find both transactions in that block"
 	);
 }
 
