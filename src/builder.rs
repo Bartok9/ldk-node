@@ -1926,7 +1926,7 @@ fn build_with_store_internal(
 	let logger_ref = Arc::clone(&logger);
 	let (monitor_read_res, network_graph_res) = runtime.block_on(async {
 		tokio::join!(
-			monitor_reader.read_all_channel_monitors_with_updates_parallel(),
+			monitor_reader.read_all_channel_monitors_with_updates(),
 			read_network_graph(&*kv_store_ref, logger_ref),
 		)
 	});

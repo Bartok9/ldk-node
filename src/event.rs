@@ -19,8 +19,9 @@ use lightning::events::bump_transaction::BumpTransactionEvent;
 #[cfg(not(feature = "uniffi"))]
 use lightning::events::PaidBolt12Invoice;
 use lightning::events::{
-	ClosureReason, Event as LdkEvent, FundingInfo, HTLCLocator as LdkHtlcLocator,
-	PaymentFailureReason, PaymentPurpose, ReplayEvent,
+	ClosureReason, Event as LdkEvent, FundingInfo, InboundHTLCLocator as LdkInboundHtlcLocator,
+	OutboundHTLCLocator as LdkOutboundHtlcLocator, PaymentFailureReason, PaymentPurpose,
+	ReplayEvent,
 };
 use lightning::ln::channelmanager::{PaymentId, TrustedChannelFeatures};
 use lightning::ln::types::ChannelId;
@@ -91,8 +92,19 @@ impl_writeable_tlv_based!(HTLCLocator, {
 	(7, amount_msat, option),
 });
 
-impl From<LdkHtlcLocator> for HTLCLocator {
-	fn from(value: LdkHtlcLocator) -> Self {
+impl From<LdkInboundHtlcLocator> for HTLCLocator {
+	fn from(value: LdkInboundHtlcLocator) -> Self {
+		HTLCLocator {
+			channel_id: value.channel_id,
+			amount_msat: value.amount_msat,
+			user_channel_id: value.user_channel_id.map(|u| UserChannelId(u)),
+			node_id: value.node_id,
+		}
+	}
+}
+
+impl From<LdkOutboundHtlcLocator> for HTLCLocator {
+	fn from(value: LdkOutboundHtlcLocator) -> Self {
 		HTLCLocator {
 			channel_id: value.channel_id,
 			amount_msat: value.amount_msat,
