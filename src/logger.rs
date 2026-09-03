@@ -22,6 +22,8 @@ pub(crate) use lightning::util::logger::{Logger as LdkLogger, Record as LdkRecor
 pub(crate) use lightning::{log_bytes, log_debug, log_error, log_info, log_trace, log_warn};
 use log::{Level as LogFacadeLevel, Record as LogFacadeRecord};
 
+use crate::io::utils::create_dir_all_private;
+
 /// A unit of logging output with metadata to enable filtering `module_path`,
 /// `file`, and `line` to inform on log's source.
 #[cfg(not(feature = "uniffi"))]
@@ -261,7 +263,7 @@ impl Logger {
 	/// are the path to the log file, and the log level.
 	pub fn new_fs_writer(file_path: String, max_log_level: LogLevel) -> Result<Self, ()> {
 		if let Some(parent_dir) = Path::new(&file_path).parent() {
-			fs::create_dir_all(parent_dir)
+			create_dir_all_private(parent_dir)
 				.map_err(|e| eprintln!("ERROR: Failed to create log parent directory: {}", e))?;
 
 			// make sure the file exists.

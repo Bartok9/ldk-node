@@ -10,7 +10,7 @@ use std::io::Write;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 #[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -52,6 +52,14 @@ use crate::{Error, EventQueue, NodeMetrics, PersistedNodeMetrics};
 
 pub const EXTERNAL_PATHFINDING_SCORES_CACHE_KEY: &str = "external_pathfinding_scores_cache";
 
+pub(crate) fn create_dir_all_private(path: &Path) -> std::io::Result<()> {
+	let mut builder = fs::DirBuilder::new();
+	builder.recursive(true);
+	#[cfg(unix)]
+	builder.mode(0o700);
+	builder.create(path)
+}
+
 pub(crate) fn read_or_generate_seed_file(
 	keys_seed_path: &str,
 ) -> std::io::Result<[u8; WALLET_KEYS_SEED_LEN]> {
@@ -75,7 +83,7 @@ pub(crate) fn read_or_generate_seed_file(
 		})?;
 
 		if let Some(parent_dir) = Path::new(&keys_seed_path).parent() {
-			fs::create_dir_all(parent_dir)?;
+			create_dir_all_private(parent_dir)?;
 		}
 
 		#[cfg(unix)]
@@ -761,8 +769,25 @@ pub(crate) async fn read_bdk_wallet_change_set(
 
 #[cfg(test)]
 mod tests {
-	use super::read_or_generate_seed_file;
 	use super::test_utils::random_storage_path;
+	use super::{create_dir_all_private, read_or_generate_seed_file};
+
+	#[cfg(unix)]
+	#[test]
+	fn creates_private_directories() {
+		use std::os::unix::fs::PermissionsExt;
+
+		let base_path = random_storage_path();
+		let nested_path = base_path.join("parent").join("child");
+		create_dir_all_private(&nested_path).unwrap();
+
+		for path in [&base_path, &base_path.join("parent"), &nested_path] {
+			let mode = path.metadata().unwrap().permissions().mode();
+			assert_eq!(mode & 0o077, 0);
+		}
+
+		std::fs::remove_dir_all(base_path).unwrap();
+	}
 
 	#[test]
 	fn generated_seed_is_readable() {

@@ -7,6 +7,7 @@
 
 //! Objects related to [`SqliteStore`] live here.
 use std::collections::HashMap;
+#[cfg(test)]
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
@@ -20,7 +21,7 @@ use lightning::util::persist::{
 use lightning_types::string::PrintableString;
 use rusqlite::{named_params, Connection};
 
-use crate::io::utils::check_namespace_key_validity;
+use crate::io::utils::{check_namespace_key_validity, create_dir_all_private};
 
 mod migrations;
 
@@ -234,7 +235,7 @@ impl SqliteStoreInner {
 		let db_file_name = db_file_name.unwrap_or(DEFAULT_SQLITE_DB_FILE_NAME.to_string());
 		let kv_table_name = kv_table_name.unwrap_or(DEFAULT_KV_TABLE_NAME.to_string());
 
-		fs::create_dir_all(data_dir.clone()).map_err(|e| {
+		create_dir_all_private(&data_dir).map_err(|e| {
 			let msg = format!(
 				"Failed to create database destination directory {}: {}",
 				data_dir.display(),
