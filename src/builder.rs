@@ -9,13 +9,13 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::default::Default;
+use std::fmt;
 #[cfg(feature = "unified-payments")]
 use std::net::ToSocketAddrs;
 #[cfg(feature = "storage-filesystem")]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Once, RwLock};
 use std::time::SystemTime;
-use std::{fmt, fs};
 
 use bdk_wallet::template::Bip84;
 use bdk_wallet::{KeychainKind, Wallet as BdkWallet};
@@ -72,6 +72,8 @@ use crate::gossip::GossipSource;
 use crate::io::fs_store::open_or_migrate_fs_store;
 #[cfg(feature = "storage-sqlite")]
 use crate::io::sqlite_store::SqliteStore;
+#[cfg(feature = "storage-sqlite")]
+use crate::io::utils::create_dir_all_private;
 use crate::io::utils::{
 	read_all_objects, read_event_queue, read_external_pathfinding_scores_from_cache,
 	read_n_objects, read_network_graph, read_node_metrics, read_output_sweeper, read_peer_info,
@@ -692,7 +694,7 @@ impl NodeBuilder {
 	pub fn build(&self, node_entropy: NodeEntropy) -> Result<Node, BuildError> {
 		let logger = setup_logger(&self.log_writer_config, &self.config)?;
 		let storage_dir_path = self.config.storage_dir_path.clone();
-		fs::create_dir_all(storage_dir_path.clone())
+		create_dir_all_private(storage_dir_path.as_ref())
 			.map_err(|_| BuildError::StoragePathAccessFailed)?;
 		let kv_store = SqliteStore::new(
 			storage_dir_path.into(),

@@ -12,6 +12,7 @@ use lightning::util::persist::migrate_kv_store_data_async;
 use lightning_persister::fs_store::v1::FilesystemStore;
 use lightning_persister::fs_store::v2::{FilesystemStoreV2, FilesystemStoreV2Error};
 
+use crate::io::utils::create_dir_all_private;
 use crate::BuildError;
 
 /// Opens a [`FilesystemStoreV2`], automatically migrating from v1 format if necessary.
@@ -23,10 +24,11 @@ pub(crate) async fn open_or_migrate_fs_store(
 	storage_dir_path: PathBuf,
 ) -> Result<FilesystemStoreV2, BuildError> {
 	let parent_dir = storage_dir_path.parent().ok_or(BuildError::StoragePathAccessFailed)?;
-	fs::create_dir_all(parent_dir).map_err(|_| BuildError::StoragePathAccessFailed)?;
+	create_dir_all_private(parent_dir).map_err(|_| BuildError::StoragePathAccessFailed)?;
 	recover_incomplete_fs_store_migration(&storage_dir_path)?;
 	if !storage_dir_path.exists() {
-		fs::create_dir_all(&storage_dir_path).map_err(|_| BuildError::StoragePathAccessFailed)?;
+		create_dir_all_private(&storage_dir_path)
+			.map_err(|_| BuildError::StoragePathAccessFailed)?;
 	}
 
 	match FilesystemStoreV2::new(storage_dir_path.clone()) {
@@ -36,7 +38,7 @@ pub(crate) async fn open_or_migrate_fs_store(
 			let v1_store = FilesystemStore::new(storage_dir_path.clone());
 
 			let v2_dir = fs_store_sibling_path(&storage_dir_path, "fs_store_v2_migrating");
-			fs::create_dir_all(&v2_dir).map_err(|_| BuildError::StoragePathAccessFailed)?;
+			create_dir_all_private(&v2_dir).map_err(|_| BuildError::StoragePathAccessFailed)?;
 			let v2_store = FilesystemStoreV2::new(v2_dir.clone())
 				.map_err(|_| BuildError::KVStoreSetupFailed)?;
 
